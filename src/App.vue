@@ -13,7 +13,7 @@ const activeModule = ref<'consistency' | 'search'>('consistency')
         <el-segmented
           v-model="activeModule"
           :options="[
-            { label: '一致性检验', value: 'consistency' },
+            { label: '需求审阅', value: 'consistency' },
             { label: '代码回溯', value: 'search' }
           ]"
         />
