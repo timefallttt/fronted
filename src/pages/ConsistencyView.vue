@@ -591,6 +591,12 @@ onMounted(async () => {
                 <span>图路径 {{ taskDetail.report.evidence_pack.graph_paths.length }}</span>
                 <span>要点映射 {{ taskDetail.report.evidence_pack.requirement_items.length }}</span>
               </div>
+              <div v-if="taskDetail.report.llm_request_preview" class="llm-review-box">
+                <strong>LLM 请求预览</strong>
+                <p class="mini">{{ taskDetail.report.llm_request_preview.model_name }} · {{ taskDetail.report.llm_request_preview.mode }}</p>
+                <p>{{ taskDetail.report.llm_request_preview.summary }}</p>
+                <pre class="code">{{ JSON.stringify(taskDetail.report.llm_request_preview.request_body, null, 2) }}</pre>
+              </div>
               <div class="grid">
                 <div>
                   <strong>逐条结论</strong>
@@ -769,6 +775,7 @@ onMounted(async () => {
 .code { overflow: auto; margin: 8px 0 0; padding: 12px; border-radius: 12px; background: #1f2632; color: #edf2fd; font-size: 12px; white-space: pre-wrap; }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
 .evidence-pack-bar { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: rgba(24, 92, 84, 0.08); color: #185c54; font-size: 13px; }
+.llm-review-box { margin-top: 14px; padding: 14px; border-radius: 12px; background: rgba(33, 52, 77, 0.06); }
 .dialog-grid { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 16px; }
 .seed-list { max-height: 420px; overflow: auto; padding-right: 4px; }
 .diff-card { margin-top: 10px; padding: 10px; border-radius: 10px; background: #f8fbff; border: 1px solid rgba(50, 91, 130, 0.08); }

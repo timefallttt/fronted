@@ -148,6 +148,14 @@ export interface LlmEvidencePack {
   tool_findings: ToolFinding[]
 }
 
+export interface LlmRequestPreview {
+  mode: 'preview'
+  provider: string
+  model_name: string
+  summary: string
+  request_body: Record<string, unknown>
+}
+
 export interface ReviewReport {
   overall_score: number
   overall_confidence: number
@@ -160,6 +168,7 @@ export interface ReviewReport {
   structural_gaps: string[]
   review_focuses: string[]
   evidence_pack?: LlmEvidencePack | null
+  llm_request_preview?: LlmRequestPreview | null
   summary: string
 }
 
