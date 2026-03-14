@@ -518,6 +518,12 @@ onMounted(async () => {
             <el-card v-if="taskDetail.report" class="inner panel-card">
               <template #header><span>审阅报告</span></template>
               <el-alert :title="taskDetail.report.summary" type="info" :closable="false" />
+              <div v-if="taskDetail.report.evidence_pack" class="evidence-pack-bar">
+                <span>证据包</span>
+                <span>片段 {{ taskDetail.report.evidence_pack.snippets.length }}</span>
+                <span>图路径 {{ taskDetail.report.evidence_pack.graph_paths.length }}</span>
+                <span>要点映射 {{ taskDetail.report.evidence_pack.requirement_items.length }}</span>
+              </div>
               <div class="grid">
                 <div>
                   <strong>逐条结论</strong>
@@ -695,6 +701,7 @@ onMounted(async () => {
 .log-line { color: #dbe7ff; font-size: 12px; line-height: 1.7; word-break: break-all; }
 .code { overflow: auto; margin: 8px 0 0; padding: 12px; border-radius: 12px; background: #1f2632; color: #edf2fd; font-size: 12px; white-space: pre-wrap; }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+.evidence-pack-bar { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: rgba(24, 92, 84, 0.08); color: #185c54; font-size: 13px; }
 .dialog-grid { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 16px; }
 .seed-list { max-height: 420px; overflow: auto; padding-right: 4px; }
 .diff-card { margin-top: 10px; padding: 10px; border-radius: 10px; background: #f8fbff; border: 1px solid rgba(50, 91, 130, 0.08); }

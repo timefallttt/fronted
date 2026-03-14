@@ -96,6 +96,54 @@ export interface ToolFinding {
   related_item?: string | null
 }
 
+export interface LlmEvidenceSnippet {
+  snippet_id: string
+  source: 'candidate' | 'diff_seed'
+  filename: string
+  start_line: number
+  end_line: number
+  code: string
+  reason: string
+}
+
+export interface LlmEvidenceGraphNode {
+  node_id: string
+  label: string
+  node_type: NodeType
+  path: string
+  start_line?: number | null
+  end_line?: number | null
+  signature: string
+  code_excerpt: string
+  relation_from_prev?: string | null
+}
+
+export interface LlmEvidencePath {
+  path_id: string
+  title: string
+  summary: string
+  supports_items: string[]
+  nodes: LlmEvidenceGraphNode[]
+}
+
+export interface LlmEvidenceRequirementItem {
+  item: string
+  status_hint: JudgementStatus
+  snippet_ids: string[]
+  path_ids: string[]
+  negative_signals: string[]
+}
+
+export interface LlmEvidencePack {
+  requirement_text: string
+  acceptance_criteria: string[]
+  snippets: LlmEvidenceSnippet[]
+  graph_paths: LlmEvidencePath[]
+  requirement_items: LlmEvidenceRequirementItem[]
+  structural_gaps: string[]
+  tool_findings: ToolFinding[]
+}
+
 export interface ReviewReport {
   overall_score: number
   overall_confidence: number
@@ -107,6 +155,7 @@ export interface ReviewReport {
   evidence_paths: EvidencePath[]
   structural_gaps: string[]
   review_focuses: string[]
+  evidence_pack?: LlmEvidencePack | null
   summary: string
 }
 
