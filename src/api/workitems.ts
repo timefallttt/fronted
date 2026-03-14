@@ -3,6 +3,7 @@ import type { ReviewTaskDetail } from './consistency'
 
 export type WorkItemPriority = 'high' | 'medium' | 'low'
 export type ConnectorMode = 'demo' | 'custom'
+export type DiffChangeType = 'added' | 'modified' | 'deleted' | 'renamed'
 
 export interface WorkItemConnectorSummary {
   connector_key: string
@@ -19,6 +20,35 @@ export interface WorkItemCodeSeed {
   end_line: number
   recall_reason: string
   source: string
+}
+
+export interface WorkItemDiffHunk {
+  hunk_id: string
+  header: string
+  start_line: number
+  end_line: number
+  added_lines: string[]
+  removed_lines: string[]
+  context_lines: string[]
+}
+
+export interface WorkItemFileDiff {
+  diff_id: string
+  filename: string
+  change_type: DiffChangeType
+  additions: number
+  deletions: number
+  hunks: WorkItemDiffHunk[]
+}
+
+export interface WorkItemLinkedCommit {
+  commit_id: string
+  commit_hash: string
+  title: string
+  author: string
+  created_at: string
+  message: string
+  file_diffs: WorkItemFileDiff[]
 }
 
 export interface WorkItemSummary {
@@ -39,7 +69,9 @@ export interface WorkItemDetail extends WorkItemSummary {
   owner: string
   notes: string
   external_url: string
-  candidate_seeds: WorkItemCodeSeed[]
+  linked_commits: WorkItemLinkedCommit[]
+  derived_seeds: WorkItemCodeSeed[]
+  derived_seed_count: number
   snapshot_hint: string
 }
 

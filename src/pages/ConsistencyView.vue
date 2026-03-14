@@ -1,18 +1,14 @@
 ﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { DocumentAdd, Download, Link, Promotion, RefreshRight } from '@element-plus/icons-vue'
+import { Download, Link, RefreshRight } from '@element-plus/icons-vue'
 import {
   analyzeReviewTask,
-  createReviewTask,
   getReviewDashboard,
   getReviewHistory,
   getReviewTask,
   submitReviewFeedback,
-  type CandidateSnippet,
   type FeedbackDecision,
-  type GraphEvidenceBundle,
-  type Priority,
   type ReviewDashboardResponse,
   type ReviewHistoryRecord,
   type ReviewTaskDetail
@@ -21,9 +17,7 @@ import {
   createIndexJob,
   getIndexJob,
   listIndexJobs,
-  queryIndexEvidence,
   runIndexJob,
-  type GraphEvidenceQueryResponse,
   type GraphStoreStatus,
   type IndexJobDetail,
   type IndexJobStatus,
@@ -40,15 +34,12 @@ import {
   type WorkItemSummary
 } from '@/api/workitems'
 
-interface SnippetForm extends CandidateSnippet {}
-
 const dashboard = ref<ReviewDashboardResponse | null>(null)
 const indexingJobs = ref<IndexJobSummary[]>([])
 const currentRepoJob = ref<IndexJobDetail | null>(null)
 const taskDetail = ref<ReviewTaskDetail | null>(null)
 const historyRecords = ref<ReviewHistoryRecord[]>([])
 const activeTaskId = ref('')
-const evidencePreview = ref<GraphEvidenceQueryResponse | null>(null)
 const workitemConnectors = ref<WorkItemConnectorSummary[]>([])
 const workitems = ref<WorkItemSummary[]>([])
 const workitemDetail = ref<WorkItemDetail | null>(null)
@@ -58,31 +49,16 @@ const selectedWorkItemId = ref('')
 const loadingDashboard = ref(false)
 const loadingTask = ref(false)
 const loadingIndexing = ref(false)
-const loadingEvidence = ref(false)
 const loadingWorkitems = ref(false)
 const loadingWorkitemDetail = ref(false)
-const creatingTask = ref(false)
 const creatingRepoJob = ref(false)
 const importingWorkitem = ref(false)
 const runningRepoJobId = ref('')
 const submittingFeedback = ref(false)
-const createDialogVisible = ref(false)
 const connectRepoDialogVisible = ref(false)
 const importDialogVisible = ref(false)
 
 let pollingTimer: number | null = null
-
-const taskForm = reactive({
-  requirementId: '',
-  title: '',
-  requirementText: '',
-  acceptanceText: '',
-  businessTag: '',
-  priority: 'medium' as Priority,
-  owner: '',
-  notes: '',
-  snippets: [] as SnippetForm[]
-})
 
 const repoForm = reactive({ repoUrl: '', branch: 'main', repoName: '' })
 const feedbackForm = reactive({ judgementItem: '', decision: 'agree' as FeedbackDecision, comment: '', reviewer: '' })
@@ -103,14 +79,21 @@ const indexStatusMeta: Record<IndexJobStatus, string> = {
   completed_with_warnings: '完成但有告警',
   failed: '建库失败'
 }
-const parserModeMeta: Record<ParserMode, string> = { arkanalyzer: 'ArkAnalyzer', placeholder: '占位解析' }
+const parserModeMeta: Record<ParserMode, string> = {
+  arkanalyzer: 'ArkAnalyzer',
+  placeholder: '占位解析'
+}
 const graphStoreMeta: Record<GraphStoreStatus, string> = {
   loaded: '已写入 Neo4j',
   pending_setup: '待配置 Neo4j',
   failed: 'Neo4j 写入失败',
   not_attempted: '未写入'
 }
-const feedbackLabel: Record<FeedbackDecision, string> = { agree: '认同', question: '存疑', misjudged: '误判' }
+const feedbackLabel: Record<FeedbackDecision, string> = {
+  agree: '认同',
+  question: '存疑',
+  misjudged: '误判'
+}
 
 const currentRepoName = computed(() => currentRepoJob.value?.snapshot.repo_name ?? '')
 const currentRepoReady = computed(() => Boolean(currentRepoJob.value) && ['completed', 'completed_with_warnings'].includes(currentRepoJob.value.summary.status))
@@ -161,76 +144,6 @@ watch(selectedConnectorKey, async (connectorKey) => {
 })
 
 onBeforeUnmount(stopPolling)
-
-const makeSnippet = (): SnippetForm => ({
-  snippet_id: `snippet-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
-  filename: '',
-  code: '',
-  start_line: 1,
-  end_line: 1,
-  recall_reason: '',
-  source: 'retrieval',
-  selected: true
-})
-
-const resetTaskForm = () => {
-  taskForm.requirementId = ''
-  taskForm.title = ''
-  taskForm.requirementText = ''
-  taskForm.acceptanceText = ''
-  taskForm.businessTag = ''
-  taskForm.priority = 'medium'
-  taskForm.owner = ''
-  taskForm.notes = ''
-  taskForm.snippets = [makeSnippet()]
-  evidencePreview.value = null
-}
-
-const normalizeSnippets = () =>
-  taskForm.snippets
-    .filter((item) => item.filename.trim() || item.code.trim())
-    .map((item, index) => ({
-      snippet_id: item.snippet_id || `snippet-${index + 1}`,
-      filename: item.filename.trim() || `unknown_${index + 1}.ts`,
-      code: item.code,
-      start_line: Math.max(1, item.start_line || 1),
-      end_line: Math.max(item.start_line || 1, item.end_line || 1),
-      recall_reason: item.recall_reason.trim() || '人工补充候选代码',
-      source: item.source || 'manual',
-      selected: item.selected
-    }))
-
-const guessSeedName = (snippet: CandidateSnippet) => {
-  const match = snippet.code.match(/(?:async\s+function|function|class)\s+([A-Za-z_][A-Za-z0-9_]*)/)
-  if (match?.[1]) return match[1]
-  const last = snippet.filename.split('/').pop() ?? snippet.filename
-  return last.replace(/\.(ets|ts|tsx|js|jsx)$/i, '')
-}
-
-const toEvidenceBundle = (response: GraphEvidenceQueryResponse): GraphEvidenceBundle => ({
-  source: response.source,
-  hints: response.hints,
-  summary: response.summary,
-  paths: response.paths.map((path) => ({
-    path_id: path.path_id,
-    hop_count: path.hop_count,
-    nodes: path.nodes.map((node) => ({
-      node_id: node.node_id,
-      node_type: node.node_type,
-      name: node.name,
-      path: node.path,
-      relation_from_prev: node.relation_from_prev ?? null
-    }))
-  }))
-})
-
-const buildSeedQueries = () =>
-  normalizeSnippets().map((snippet) => ({
-    path: snippet.filename,
-    name: guessSeedName(snippet),
-    signature: snippet.code.split('\n')[0]?.slice(0, 120) || '',
-    max_matches: 3
-  }))
 
 const formatScore = (value?: number) => Number(value ?? 0).toFixed(3)
 const formatTime = (value?: string) => value?.replace('T', ' ') ?? '-'
@@ -334,18 +247,12 @@ const selectRepoJob = async (jobId: string) => {
   activeTaskId.value = ''
   taskDetail.value = null
   historyRecords.value = []
-  evidencePreview.value = null
 }
 
 const refreshCurrentRepo = async () => {
   if (!currentRepoJob.value) return
   currentRepoJob.value = await getIndexJob(currentRepoJob.value.summary.job_id)
   await loadIndexingJobs(false)
-}
-
-const openCreateDialog = () => {
-  resetTaskForm()
-  createDialogVisible.value = true
 }
 
 const openImportDialog = async () => {
@@ -359,32 +266,6 @@ const openImportDialog = async () => {
   } else if (selectedConnectorKey.value) {
     await loadWorkitems(selectedConnectorKey.value, false)
   }
-}
-
-const applyWorkitemToTaskForm = () => {
-  if (!workitemDetail.value) return
-  resetTaskForm()
-  taskForm.requirementId = workitemDetail.value.requirement_id
-  taskForm.title = workitemDetail.value.title
-  taskForm.requirementText = workitemDetail.value.requirement_text
-  taskForm.acceptanceText = workitemDetail.value.acceptance_criteria.join('\n')
-  taskForm.businessTag = workitemDetail.value.business_tag
-  taskForm.priority = workitemDetail.value.priority as Priority
-  taskForm.owner = workitemDetail.value.owner
-  taskForm.notes = workitemDetail.value.notes
-  taskForm.snippets = workitemDetail.value.candidate_seeds.map((seed) => ({
-    snippet_id: seed.seed_id,
-    filename: seed.filename,
-    code: seed.code,
-    start_line: seed.start_line,
-    end_line: seed.end_line,
-    recall_reason: seed.recall_reason,
-    source: seed.source,
-    selected: true
-  }))
-  if (!taskForm.snippets.length) taskForm.snippets = [makeSnippet()]
-  importDialogVisible.value = false
-  createDialogVisible.value = true
 }
 
 const handleCreateRepoJob = async () => {
@@ -427,72 +308,6 @@ const handleRunRepoJob = async (jobId: string) => {
     console.error(error)
   } finally {
     runningRepoJobId.value = ''
-  }
-}
-
-const handleExpandEvidence = async () => {
-  if (!currentRepoReady.value || !currentRepoJob.value) {
-    ElMessage.warning('请先完成当前仓库的离线建库')
-    return
-  }
-  const seeds = buildSeedQueries().filter((seed) => seed.path || seed.name || seed.signature)
-  if (!seeds.length) {
-    ElMessage.warning('请先提供至少一段候选种子代码')
-    return
-  }
-  loadingEvidence.value = true
-  try {
-    evidencePreview.value = await queryIndexEvidence(currentRepoJob.value.summary.job_id, {
-      seeds,
-      max_hops: 2,
-      max_paths: 20,
-      edge_types: ['CALLS', 'CONTAINS']
-    })
-    ElMessage.success('已完成图证据扩展')
-  } catch (error) {
-    ElMessage.error('图证据扩展失败')
-    console.error(error)
-  } finally {
-    loadingEvidence.value = false
-  }
-}
-
-const handleCreateTask = async () => {
-  if (!currentRepoReady.value || !currentRepoJob.value) {
-    ElMessage.warning('请先完成当前仓库的离线建库')
-    return
-  }
-  if (!taskForm.requirementId.trim() || !taskForm.title.trim() || !taskForm.requirementText.trim()) {
-    ElMessage.warning('请补全任务编号、标题和需求描述')
-    return
-  }
-  creatingTask.value = true
-  try {
-    const detail = await createReviewTask({
-      requirement_id: taskForm.requirementId,
-      title: taskForm.title,
-      requirement_text: taskForm.requirementText,
-      acceptance_criteria: taskForm.acceptanceText.split('\n').map((line) => line.trim()).filter(Boolean),
-      repo_name: currentRepoJob.value.snapshot.repo_name,
-      snapshot: currentRepoJob.value.snapshot.commit_hash || currentRepoJob.value.snapshot.branch,
-      business_tag: taskForm.businessTag,
-      priority: taskForm.priority,
-      owner: taskForm.owner,
-      notes: taskForm.notes,
-      candidate_snippets: normalizeSnippets(),
-      graph_evidence: evidencePreview.value ? toEvidenceBundle(evidencePreview.value) : undefined,
-      options: { top_k: 10, keyword_min_overlap: 0.2, enable_tool_evidence: true }
-    })
-    createDialogVisible.value = false
-    resetTaskForm()
-    await loadDashboard()
-    await loadTask(detail.task.task_id)
-    ElMessage.success('已创建审阅任务')
-  } catch (error) {
-    ElMessage.error('创建审阅任务失败')
-    console.error(error)
-  } finally {
-    creatingTask.value = false
   }
 }
 
@@ -564,7 +379,6 @@ const handleSubmitFeedback = async () => {
 }
 
 onMounted(async () => {
-  resetTaskForm()
   await Promise.all([loadIndexingJobs(false), loadDashboard(), loadWorkitemConnectors()])
 })
 </script>
@@ -575,12 +389,11 @@ onMounted(async () => {
       <div>
         <p class="eyebrow">Requirement Review Workspace</p>
         <h1>需求实现审阅工作台</h1>
-        <p class="hero-text">当前链路：接入仓库、离线建图、需求工单导入、图证据扩展、审阅任务生成。当前仓库完成建库后，工单导入和审阅任务区自动解锁。</p>
+        <p class="hero-text">当前链路：接入仓库、离线建图、导入需求工单、自动扩展图证据、生成审阅任务。当前仓库完成建库后，系统仅接受需求工单作为审阅输入。</p>
       </div>
       <el-space wrap>
         <el-button type="primary" @click="connectRepoDialogVisible = true"><el-icon><Link /></el-icon>接入代码仓库</el-button>
         <el-button type="primary" plain :disabled="!currentRepoReady" @click="openImportDialog"><el-icon><Download /></el-icon>导入需求工单</el-button>
-        <el-button type="primary" plain :disabled="!currentRepoReady" @click="openCreateDialog"><el-icon><DocumentAdd /></el-icon>新建审阅任务</el-button>
         <el-button :loading="loadingIndexing" @click="refreshCurrentRepo"><el-icon><RefreshRight /></el-icon>刷新</el-button>
       </el-space>
     </div>
@@ -588,7 +401,12 @@ onMounted(async () => {
     <el-row :gutter="16" class="block-row">
       <el-col :xs="24" :xl="10">
         <el-card class="panel-card">
-          <template #header><div class="head"><span>当前仓库</span><el-tag>{{ currentRepoReady ? '可审阅' : '未就绪' }}</el-tag></div></template>
+          <template #header>
+            <div class="head">
+              <span>当前仓库</span>
+              <el-tag>{{ currentRepoReady ? '可审阅' : '未就绪' }}</el-tag>
+            </div>
+          </template>
           <template v-if="currentRepoJob">
             <p class="repo-title"><strong>{{ currentRepoJob.snapshot.repo_name }}</strong></p>
             <p class="mini">{{ currentRepoJob.snapshot.repo_url }}</p>
@@ -608,7 +426,7 @@ onMounted(async () => {
             <ul v-if="currentRepoJob.setup_hints.length" class="mini-list">
               <li v-for="hint in currentRepoJob.setup_hints" :key="hint">{{ hint }}</li>
             </ul>
-            <div class="log-box" v-if="currentRepoJob.logs.length">
+            <div v-if="currentRepoJob.logs.length" class="log-box">
               <div v-for="log in currentRepoJob.logs" :key="log" class="log-line">{{ log }}</div>
             </div>
           </template>
@@ -618,7 +436,12 @@ onMounted(async () => {
 
       <el-col :xs="24" :xl="14">
         <el-card class="panel-card">
-          <template #header><div class="head"><span>建库任务</span><el-button text @click="loadIndexingJobs()">刷新</el-button></div></template>
+          <template #header>
+            <div class="head">
+              <span>建库任务</span>
+              <el-button text @click="loadIndexingJobs()">刷新</el-button>
+            </div>
+          </template>
           <div v-for="job in indexingJobs" :key="job.job_id" class="list-card" :class="{ active: currentRepoJob?.summary.job_id === job.job_id }">
             <div class="head">
               <strong>{{ job.repo_name }}</strong>
@@ -637,14 +460,22 @@ onMounted(async () => {
     <el-row :gutter="16" class="block-row">
       <el-col :xs="24" :xl="7">
         <el-card class="panel-card">
-          <template #header><div class="head"><span>审阅任务</span><el-tag>{{ repoTasks.length }}</el-tag></div></template>
+          <template #header>
+            <div class="head">
+              <span>审阅任务</span>
+              <el-tag>{{ repoTasks.length }}</el-tag>
+            </div>
+          </template>
           <div class="stat-grid compact">
             <div class="stat-box"><span>总数</span><strong>{{ repoTaskStats.total }}</strong></div>
             <div class="stat-box"><span>已完成</span><strong>{{ repoTaskStats.completed }}</strong></div>
             <div class="stat-box"><span>待复核</span><strong>{{ repoTaskStats.review }}</strong></div>
           </div>
-          <div v-for="task in repoTasks" :key="task.task_id" class="list-card" :class="{ active: task.task_id === activeTaskId }" @click="loadTask(task.task_id)">
-            <div class="head"><strong>{{ task.title }}</strong><span class="mini">{{ reviewStatusMeta[task.status] }}</span></div>
+          <div v-for="task in repoTasks" :key="task.task_id" class="list-card clickable" :class="{ active: task.task_id === activeTaskId }" @click="loadTask(task.task_id)">
+            <div class="head">
+              <strong>{{ task.title }}</strong>
+              <span class="mini">{{ reviewStatusMeta[task.status] }}</span>
+            </div>
             <p class="mini">{{ task.requirement_id }} · {{ task.business_tag || '未分类' }}</p>
             <p class="mini">分数 {{ formatScore(task.overall_score) }}</p>
           </div>
@@ -653,7 +484,12 @@ onMounted(async () => {
 
       <el-col :xs="24" :xl="17">
         <el-card class="panel-card">
-          <template #header><div class="head"><span>{{ taskDetail?.task.title || '审阅详情' }}</span><el-button type="primary" plain :disabled="!activeTaskId || !currentRepoReady" :loading="loadingTask" @click="handleAnalyzeTask">重新生成报告</el-button></div></template>
+          <template #header>
+            <div class="head">
+              <span>{{ taskDetail?.task.title || '审阅详情' }}</span>
+              <el-button type="primary" plain :disabled="!activeTaskId || !currentRepoReady" :loading="loadingTask" @click="handleAnalyzeTask">重新生成报告</el-button>
+            </div>
+          </template>
           <el-empty v-if="!taskDetail" description="请选择一个审阅任务" :image-size="64" />
           <template v-else>
             <el-descriptions :column="2" border>
@@ -662,11 +498,91 @@ onMounted(async () => {
               <el-descriptions-item label="仓库">{{ taskDetail.task.repo_name }}</el-descriptions-item>
               <el-descriptions-item label="快照">{{ taskDetail.task.snapshot }}</el-descriptions-item>
             </el-descriptions>
-            <el-card class="inner panel-card"><template #header><span>需求描述</span></template><p>{{ taskDetail.requirement_text }}</p></el-card>
-            <el-card class="inner panel-card"><template #header><span>候选代码</span></template><div v-for="snippet in taskDetail.candidate_snippets" :key="snippet.snippet_id" class="list-card"><strong>{{ snippet.filename }}</strong><p class="mini">{{ snippet.recall_reason }}</p><pre class="code">{{ snippet.code }}</pre></div></el-card>
-            <el-card v-if="taskDetail.graph_evidence" class="inner panel-card"><template #header><span>图证据概览</span></template><p class="mini">来源 {{ taskDetail.graph_evidence.source }}</p><p class="mini">命中 seed {{ taskDetail.graph_evidence.summary.matched_seed_count }}，扩展节点 {{ taskDetail.graph_evidence.summary.expanded_node_count }}，路径 {{ taskDetail.graph_evidence.summary.evidence_path_count }}</p></el-card>
-            <el-card v-if="taskDetail.report" class="inner panel-card"><template #header><span>审阅报告</span></template><el-alert :title="taskDetail.report.summary" type="info" :closable="false" /><div class="grid"><div><strong>逐条结论</strong><ul class="mini-list"><li v-for="item in taskDetail.report.judgements" :key="item.item">{{ item.item }} · {{ reviewStatusMeta[item.status] }} · {{ item.score.toFixed(2) }}</li></ul></div><div><strong>证据路径</strong><ul class="mini-list"><li v-for="path in taskDetail.report.evidence_paths" :key="path.path_id">{{ path.nodes.map((node) => node.label).join(' -> ') || path.title }}</li></ul></div><div><strong>结构性缺口</strong><ul class="mini-list"><li v-for="gap in taskDetail.report.structural_gaps" :key="gap">{{ gap }}</li></ul></div><div><strong>建议复核点</strong><ul class="mini-list"><li v-for="focus in taskDetail.report.review_focuses" :key="focus">{{ focus }}</li></ul></div></div></el-card>
-            <el-card class="inner panel-card"><template #header><span>人工复核</span></template><el-form label-position="top"><el-row :gutter="12"><el-col :span="8"><el-form-item label="要点"><el-select v-model="feedbackForm.judgementItem"><el-option v-for="item in feedbackItems" :key="item" :label="item" :value="item" /></el-select></el-form-item></el-col><el-col :span="8"><el-form-item label="结论"><el-select v-model="feedbackForm.decision"><el-option label="认同" value="agree" /><el-option label="存疑" value="question" /><el-option label="误判" value="misjudged" /></el-select></el-form-item></el-col><el-col :span="8"><el-form-item label="复核人"><el-input v-model="feedbackForm.reviewer" /></el-form-item></el-col></el-row><el-form-item label="备注"><el-input v-model="feedbackForm.comment" type="textarea" :rows="3" /></el-form-item><el-button type="primary" :loading="submittingFeedback" @click="handleSubmitFeedback">提交复核</el-button></el-form><ul class="mini-list"><li v-for="entry in taskDetail.feedback_entries" :key="entry.feedback_id">{{ entry.judgement_item }} · {{ feedbackLabel[entry.decision] }} · {{ entry.reviewer }} · {{ formatTime(entry.created_at) }}</li></ul><ul class="mini-list"><li v-for="record in historyRecords" :key="record.record_id">{{ record.label }} · {{ formatScore(record.overall_score) }}</li></ul></el-card>
+            <el-card class="inner panel-card">
+              <template #header><span>需求描述</span></template>
+              <p>{{ taskDetail.requirement_text }}</p>
+            </el-card>
+            <el-card class="inner panel-card">
+              <template #header><span>候选代码</span></template>
+              <div v-for="snippet in taskDetail.candidate_snippets" :key="snippet.snippet_id" class="list-card">
+                <strong>{{ snippet.filename }}</strong>
+                <p class="mini">{{ snippet.recall_reason }}</p>
+                <pre class="code">{{ snippet.code }}</pre>
+              </div>
+            </el-card>
+            <el-card v-if="taskDetail.graph_evidence" class="inner panel-card">
+              <template #header><span>图证据概览</span></template>
+              <p class="mini">来源 {{ taskDetail.graph_evidence.source }}</p>
+              <p class="mini">命中 seed {{ taskDetail.graph_evidence.summary.matched_seed_count }}，扩展节点 {{ taskDetail.graph_evidence.summary.expanded_node_count }}，路径 {{ taskDetail.graph_evidence.summary.evidence_path_count }}</p>
+            </el-card>
+            <el-card v-if="taskDetail.report" class="inner panel-card">
+              <template #header><span>审阅报告</span></template>
+              <el-alert :title="taskDetail.report.summary" type="info" :closable="false" />
+              <div class="grid">
+                <div>
+                  <strong>逐条结论</strong>
+                  <ul class="mini-list">
+                    <li v-for="item in taskDetail.report.judgements" :key="item.item">{{ item.item }} · {{ reviewStatusMeta[item.status] }} · {{ item.score.toFixed(2) }}</li>
+                  </ul>
+                </div>
+                <div>
+                  <strong>证据路径</strong>
+                  <ul class="mini-list">
+                    <li v-for="path in taskDetail.report.evidence_paths" :key="path.path_id">{{ path.nodes.map((node) => node.label).join(' -> ') || path.title }}</li>
+                  </ul>
+                </div>
+                <div>
+                  <strong>结构性缺口</strong>
+                  <ul class="mini-list">
+                    <li v-for="gap in taskDetail.report.structural_gaps" :key="gap">{{ gap }}</li>
+                  </ul>
+                </div>
+                <div>
+                  <strong>建议复核点</strong>
+                  <ul class="mini-list">
+                    <li v-for="focus in taskDetail.report.review_focuses" :key="focus">{{ focus }}</li>
+                  </ul>
+                </div>
+              </div>
+            </el-card>
+            <el-card class="inner panel-card">
+              <template #header><span>人工复核</span></template>
+              <el-form label-position="top">
+                <el-row :gutter="12">
+                  <el-col :span="8">
+                    <el-form-item label="要点">
+                      <el-select v-model="feedbackForm.judgementItem">
+                        <el-option v-for="item in feedbackItems" :key="item" :label="item" :value="item" />
+                      </el-select>
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="8">
+                    <el-form-item label="结论">
+                      <el-select v-model="feedbackForm.decision">
+                        <el-option label="认同" value="agree" />
+                        <el-option label="存疑" value="question" />
+                        <el-option label="误判" value="misjudged" />
+                      </el-select>
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="8">
+                    <el-form-item label="复核人">
+                      <el-input v-model="feedbackForm.reviewer" />
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                <el-form-item label="备注">
+                  <el-input v-model="feedbackForm.comment" type="textarea" :rows="3" />
+                </el-form-item>
+                <el-button type="primary" :loading="submittingFeedback" @click="handleSubmitFeedback">提交复核</el-button>
+              </el-form>
+              <ul class="mini-list">
+                <li v-for="entry in taskDetail.feedback_entries" :key="entry.feedback_id">{{ entry.judgement_item }} · {{ feedbackLabel[entry.decision] }} · {{ entry.reviewer }} · {{ formatTime(entry.created_at) }}</li>
+              </ul>
+              <ul class="mini-list">
+                <li v-for="record in historyRecords" :key="record.record_id">{{ record.label }} · {{ formatScore(record.overall_score) }}</li>
+              </ul>
+            </el-card>
           </template>
         </el-card>
       </el-col>
@@ -675,9 +591,17 @@ onMounted(async () => {
     <el-dialog v-model="connectRepoDialogVisible" title="接入代码仓库" width="680px">
       <el-form label-position="top">
         <el-form-item label="Git 仓库链接"><el-input v-model="repoForm.repoUrl" /></el-form-item>
-        <el-row :gutter="12"><el-col :span="12"><el-form-item label="分支"><el-input v-model="repoForm.branch" /></el-form-item></el-col><el-col :span="12"><el-form-item label="仓库别名"><el-input v-model="repoForm.repoName" /></el-form-item></el-col></el-row>
+        <el-row :gutter="12">
+          <el-col :span="12"><el-form-item label="分支"><el-input v-model="repoForm.branch" /></el-form-item></el-col>
+          <el-col :span="12"><el-form-item label="仓库别名"><el-input v-model="repoForm.repoName" /></el-form-item></el-col>
+        </el-row>
       </el-form>
-      <template #footer><el-space><el-button @click="connectRepoDialogVisible = false">取消</el-button><el-button type="primary" :loading="creatingRepoJob" @click="handleCreateRepoJob">创建建库任务</el-button></el-space></template>
+      <template #footer>
+        <el-space>
+          <el-button @click="connectRepoDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="creatingRepoJob" @click="handleCreateRepoJob">创建建库任务</el-button>
+        </el-space>
+      </template>
     </el-dialog>
 
     <el-dialog v-model="importDialogVisible" title="导入需求工单" width="1120px">
@@ -707,14 +631,28 @@ onMounted(async () => {
           <template v-else>
             <p class="repo-title"><strong>{{ workitemDetail.title }}</strong></p>
             <p class="mini">负责人 {{ workitemDetail.owner || '未指定' }} · 业务 {{ workitemDetail.business_tag || '未分类' }}</p>
-            <p class="mini">该导入器边界清晰，交付后企业方可只替换 connector 实现，不改审阅主链。</p>
+            <p class="mini">系统输入固定为需求工单。导入器负责提供工单、commit 和 diff，审阅主链不接受人工补录。</p>
             <el-divider />
             <p>{{ workitemDetail.requirement_text }}</p>
             <ul class="mini-list">
               <li v-for="item in workitemDetail.acceptance_criteria" :key="item">{{ item }}</li>
             </ul>
+            <p class="mini">关联 commit {{ workitemDetail.linked_commits.length }} 个，派生种子 {{ workitemDetail.derived_seed_count }} 个</p>
             <div class="seed-list">
-              <div v-for="seed in workitemDetail.candidate_seeds" :key="seed.seed_id" class="list-card">
+              <div v-for="commit in workitemDetail.linked_commits" :key="commit.commit_id" class="list-card">
+                <div class="head"><strong>{{ commit.title }}</strong><span class="mini">{{ commit.commit_hash.slice(0, 8) }}</span></div>
+                <p class="mini">{{ commit.author || '未知作者' }} · {{ formatTime(commit.created_at) }}</p>
+                <p v-if="commit.message" class="mini">{{ commit.message }}</p>
+                <div v-for="fileDiff in commit.file_diffs" :key="fileDiff.diff_id" class="diff-card">
+                  <div class="head"><strong>{{ fileDiff.filename }}</strong><span class="mini">{{ fileDiff.change_type }} +{{ fileDiff.additions }} -{{ fileDiff.deletions }}</span></div>
+                  <div v-for="hunk in fileDiff.hunks" :key="hunk.hunk_id" class="hunk-box">
+                    <p class="mini">{{ hunk.header || 'diff hunk' }}</p>
+                    <pre class="code">{{ hunk.added_lines.join('\n') || hunk.context_lines.join('\n') }}</pre>
+                  </div>
+                </div>
+              </div>
+              <el-divider />
+              <div v-for="seed in workitemDetail.derived_seeds" :key="seed.seed_id" class="list-card">
                 <strong>{{ seed.filename }}</strong>
                 <p class="mini">{{ seed.recall_reason }}</p>
                 <pre class="code">{{ seed.code }}</pre>
@@ -726,25 +664,9 @@ onMounted(async () => {
       <template #footer>
         <el-space>
           <el-button @click="importDialogVisible = false">取消</el-button>
-          <el-button plain :disabled="!workitemDetail" @click="applyWorkitemToTaskForm">带入手工编辑</el-button>
-          <el-button type="primary" :loading="importingWorkitem" :disabled="!workitemDetail || !currentRepoReady" @click="handleImportWorkitem">直接导入并创建任务</el-button>
+          <el-button type="primary" :loading="importingWorkitem" :disabled="!workitemDetail || !currentRepoReady" @click="handleImportWorkitem">导入并创建任务</el-button>
         </el-space>
       </template>
-    </el-dialog>
-
-    <el-dialog v-model="createDialogVisible" title="新建需求审阅任务" width="920px">
-      <el-form label-position="top">
-        <el-row :gutter="12"><el-col :span="12"><el-form-item label="需求编号"><el-input v-model="taskForm.requirementId" /></el-form-item></el-col><el-col :span="12"><el-form-item label="任务标题"><el-input v-model="taskForm.title" /></el-form-item></el-col></el-row>
-        <el-form-item label="需求描述"><el-input v-model="taskForm.requirementText" type="textarea" :rows="4" /></el-form-item>
-        <el-form-item label="验收标准"><el-input v-model="taskForm.acceptanceText" type="textarea" :rows="4" placeholder="每行一条" /></el-form-item>
-        <el-row :gutter="12"><el-col :span="8"><el-form-item label="业务标签"><el-input v-model="taskForm.businessTag" /></el-form-item></el-col><el-col :span="8"><el-form-item label="优先级"><el-select v-model="taskForm.priority"><el-option label="高" value="high" /><el-option label="中" value="medium" /><el-option label="低" value="low" /></el-select></el-form-item></el-col><el-col :span="8"><el-form-item label="负责人"><el-input v-model="taskForm.owner" /></el-form-item></el-col></el-row>
-        <el-form-item label="备注"><el-input v-model="taskForm.notes" /></el-form-item>
-        <el-divider>候选种子代码</el-divider>
-        <div v-for="(snippet, index) in taskForm.snippets" :key="snippet.snippet_id" class="list-card"><el-row :gutter="12"><el-col :span="12"><el-input v-model="snippet.filename" placeholder="文件路径" /></el-col><el-col :span="4"><el-input-number v-model="snippet.start_line" :min="1" /></el-col><el-col :span="4"><el-input-number v-model="snippet.end_line" :min="snippet.start_line || 1" /></el-col><el-col :span="4"><el-button type="danger" plain @click="taskForm.snippets.splice(index, 1)">删除</el-button></el-col></el-row><el-input v-model="snippet.recall_reason" class="mt" placeholder="召回理由" /><el-input v-model="snippet.code" class="mt" type="textarea" :rows="4" placeholder="粘贴候选代码" /></div>
-        <el-space wrap><el-button plain @click="taskForm.snippets.push(makeSnippet())">新增候选代码</el-button><el-button type="primary" plain :loading="loadingEvidence" :disabled="!currentRepoReady" @click="handleExpandEvidence"><el-icon><Promotion /></el-icon>扩展图证据</el-button></el-space>
-        <el-card v-if="evidencePreview" class="inner panel-card"><template #header><span>图证据预览</span></template><p class="mini">来源 {{ evidencePreview.source }} · 命中 seed {{ evidencePreview.summary.matched_seed_count }} · 节点 {{ evidencePreview.summary.expanded_node_count }} · 路径 {{ evidencePreview.summary.evidence_path_count }}</p><ul class="mini-list"><li v-for="hint in evidencePreview.hints" :key="hint">{{ hint }}</li></ul><ul class="mini-list"><li v-for="path in evidencePreview.paths" :key="path.path_id">{{ path.nodes.map((node) => node.name).join(' -> ') }}</li></ul></el-card>
-      </el-form>
-      <template #footer><el-space><el-button @click="createDialogVisible = false">取消</el-button><el-button type="primary" :loading="creatingTask" :disabled="!currentRepoReady" @click="handleCreateTask">创建任务</el-button></el-space></template>
     </el-dialog>
   </div>
 </template>
@@ -753,7 +675,7 @@ onMounted(async () => {
 .workspace { min-height: 100vh; padding: 8px 0 24px; background: linear-gradient(180deg, #fffaf2 0%, #f5f8ff 48%, #f4f4f8 100%); }
 .hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 18px; padding: 24px; border-radius: 20px; background: linear-gradient(135deg, #21344d 0%, #325b82 62%, #d98943 100%); color: #fff; }
 .eyebrow { margin: 0 0 10px; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; opacity: 0.8; }
-.hero-text { margin: 10px 0 0; max-width: 700px; line-height: 1.7; }
+.hero-text { margin: 10px 0 0; max-width: 760px; line-height: 1.7; }
 .block-row { margin-bottom: 16px; }
 .head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .panel-card { border-radius: 18px; border: 1px solid rgba(33, 52, 77, 0.08); background: rgba(255, 255, 255, 0.92); }
@@ -775,9 +697,7 @@ onMounted(async () => {
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
 .dialog-grid { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 16px; }
 .seed-list { max-height: 420px; overflow: auto; padding-right: 4px; }
-.mt { margin-top: 10px; }
+.diff-card { margin-top: 10px; padding: 10px; border-radius: 10px; background: #f8fbff; border: 1px solid rgba(50, 91, 130, 0.08); }
+.hunk-box { margin-top: 8px; }
 @media (max-width: 960px) { .hero { flex-direction: column; align-items: flex-start; } .grid, .stat-grid, .stat-grid.compact, .dialog-grid { grid-template-columns: 1fr; } }
 </style>
-
-
-
