@@ -1,7 +1,7 @@
 ﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { DocumentAdd, Link, Promotion, RefreshRight } from '@element-plus/icons-vue'
+import { DocumentAdd, Download, Link, Promotion, RefreshRight } from '@element-plus/icons-vue'
 import {
   analyzeReviewTask,
   createReviewTask,
@@ -30,6 +30,15 @@ import {
   type IndexJobSummary,
   type ParserMode
 } from '@/api/indexing'
+import {
+  getWorkItemDetail,
+  importWorkItem,
+  listWorkItemConnectors,
+  listWorkItems,
+  type WorkItemConnectorSummary,
+  type WorkItemDetail,
+  type WorkItemSummary
+} from '@/api/workitems'
 
 interface SnippetForm extends CandidateSnippet {}
 
@@ -40,17 +49,26 @@ const taskDetail = ref<ReviewTaskDetail | null>(null)
 const historyRecords = ref<ReviewHistoryRecord[]>([])
 const activeTaskId = ref('')
 const evidencePreview = ref<GraphEvidenceQueryResponse | null>(null)
+const workitemConnectors = ref<WorkItemConnectorSummary[]>([])
+const workitems = ref<WorkItemSummary[]>([])
+const workitemDetail = ref<WorkItemDetail | null>(null)
+const selectedConnectorKey = ref('')
+const selectedWorkItemId = ref('')
 
 const loadingDashboard = ref(false)
 const loadingTask = ref(false)
 const loadingIndexing = ref(false)
 const loadingEvidence = ref(false)
+const loadingWorkitems = ref(false)
+const loadingWorkitemDetail = ref(false)
 const creatingTask = ref(false)
 const creatingRepoJob = ref(false)
+const importingWorkitem = ref(false)
 const runningRepoJobId = ref('')
 const submittingFeedback = ref(false)
 const createDialogVisible = ref(false)
 const connectRepoDialogVisible = ref(false)
+const importDialogVisible = ref(false)
 
 let pollingTimer: number | null = null
 
@@ -113,6 +131,7 @@ const repoTaskStats = computed(() => {
     review: tasks.filter((task) => task.status === 'needs_review').length
   }
 })
+const selectedConnector = computed(() => workitemConnectors.value.find((item) => item.connector_key === selectedConnectorKey.value) ?? null)
 
 const stopPolling = () => {
   if (pollingTimer !== null) {
@@ -134,6 +153,11 @@ const startPolling = () => {
 watch(currentRepoBusy, (busy) => {
   if (busy) startPolling()
   else stopPolling()
+})
+
+watch(selectedConnectorKey, async (connectorKey) => {
+  if (!connectorKey) return
+  await loadWorkitems(connectorKey, false)
 })
 
 onBeforeUnmount(stopPolling)
@@ -259,6 +283,52 @@ const loadIndexingJobs = async (showError = true) => {
   }
 }
 
+const loadWorkitemConnectors = async () => {
+  try {
+    const response = await listWorkItemConnectors()
+    workitemConnectors.value = response.connectors
+    if (!selectedConnectorKey.value && response.connectors.length) {
+      selectedConnectorKey.value = response.connectors[0].connector_key
+    }
+  } catch (error) {
+    ElMessage.error('加载工单接入器失败')
+    console.error(error)
+  }
+}
+
+const loadWorkitems = async (connectorKey: string, showError = true) => {
+  loadingWorkitems.value = true
+  try {
+    const response = await listWorkItems(connectorKey)
+    workitems.value = response.items
+    if (!selectedWorkItemId.value && response.items.length) {
+      await selectWorkItem(response.items[0].item_id)
+    } else if (selectedWorkItemId.value && !response.items.find((item) => item.item_id === selectedWorkItemId.value)) {
+      selectedWorkItemId.value = ''
+      workitemDetail.value = null
+    }
+  } catch (error) {
+    if (showError) ElMessage.error('加载工单列表失败')
+    console.error(error)
+  } finally {
+    loadingWorkitems.value = false
+  }
+}
+
+const selectWorkItem = async (itemId: string) => {
+  if (!selectedConnectorKey.value) return
+  loadingWorkitemDetail.value = true
+  selectedWorkItemId.value = itemId
+  try {
+    workitemDetail.value = await getWorkItemDetail(selectedConnectorKey.value, itemId)
+  } catch (error) {
+    ElMessage.error('加载工单详情失败')
+    console.error(error)
+  } finally {
+    loadingWorkitemDetail.value = false
+  }
+}
+
 const selectRepoJob = async (jobId: string) => {
   currentRepoJob.value = await getIndexJob(jobId)
   activeTaskId.value = ''
@@ -271,6 +341,50 @@ const refreshCurrentRepo = async () => {
   if (!currentRepoJob.value) return
   currentRepoJob.value = await getIndexJob(currentRepoJob.value.summary.job_id)
   await loadIndexingJobs(false)
+}
+
+const openCreateDialog = () => {
+  resetTaskForm()
+  createDialogVisible.value = true
+}
+
+const openImportDialog = async () => {
+  if (!currentRepoReady.value) {
+    ElMessage.warning('请先完成当前仓库的离线建库')
+    return
+  }
+  importDialogVisible.value = true
+  if (!workitemConnectors.value.length) {
+    await loadWorkitemConnectors()
+  } else if (selectedConnectorKey.value) {
+    await loadWorkitems(selectedConnectorKey.value, false)
+  }
+}
+
+const applyWorkitemToTaskForm = () => {
+  if (!workitemDetail.value) return
+  resetTaskForm()
+  taskForm.requirementId = workitemDetail.value.requirement_id
+  taskForm.title = workitemDetail.value.title
+  taskForm.requirementText = workitemDetail.value.requirement_text
+  taskForm.acceptanceText = workitemDetail.value.acceptance_criteria.join('\n')
+  taskForm.businessTag = workitemDetail.value.business_tag
+  taskForm.priority = workitemDetail.value.priority as Priority
+  taskForm.owner = workitemDetail.value.owner
+  taskForm.notes = workitemDetail.value.notes
+  taskForm.snippets = workitemDetail.value.candidate_seeds.map((seed) => ({
+    snippet_id: seed.seed_id,
+    filename: seed.filename,
+    code: seed.code,
+    start_line: seed.start_line,
+    end_line: seed.end_line,
+    recall_reason: seed.recall_reason,
+    source: seed.source,
+    selected: true
+  }))
+  if (!taskForm.snippets.length) taskForm.snippets = [makeSnippet()]
+  importDialogVisible.value = false
+  createDialogVisible.value = true
 }
 
 const handleCreateRepoJob = async () => {
@@ -382,6 +496,33 @@ const handleCreateTask = async () => {
   }
 }
 
+const handleImportWorkitem = async () => {
+  if (!currentRepoReady.value || !currentRepoJob.value || !workitemDetail.value || !selectedConnectorKey.value) {
+    ElMessage.warning('请先选择当前仓库和待导入工单')
+    return
+  }
+  importingWorkitem.value = true
+  try {
+    const detail = await importWorkItem({
+      connector_key: selectedConnectorKey.value,
+      item_id: workitemDetail.value.item_id,
+      index_job_id: currentRepoJob.value.summary.job_id,
+      repo_name: currentRepoJob.value.snapshot.repo_name,
+      snapshot: currentRepoJob.value.snapshot.commit_hash || currentRepoJob.value.snapshot.branch,
+      auto_expand_graph_evidence: true
+    })
+    importDialogVisible.value = false
+    await loadDashboard()
+    await loadTask(detail.task.task_id)
+    ElMessage.success('已导入需求工单并创建审阅任务')
+  } catch (error) {
+    ElMessage.error('导入需求工单失败')
+    console.error(error)
+  } finally {
+    importingWorkitem.value = false
+  }
+}
+
 const handleAnalyzeTask = async () => {
   if (!activeTaskId.value || !currentRepoReady.value) return
   loadingTask.value = true
@@ -424,8 +565,7 @@ const handleSubmitFeedback = async () => {
 
 onMounted(async () => {
   resetTaskForm()
-  await loadIndexingJobs(false)
-  await loadDashboard()
+  await Promise.all([loadIndexingJobs(false), loadDashboard(), loadWorkitemConnectors()])
 })
 </script>
 
@@ -435,11 +575,12 @@ onMounted(async () => {
       <div>
         <p class="eyebrow">Requirement Review Workspace</p>
         <h1>需求实现审阅工作台</h1>
-        <p class="hero-text">当前链路：接入仓库、离线建图、图证据扩展、审阅任务生成。当前仓库完成建库后，审阅任务区自动解锁。</p>
+        <p class="hero-text">当前链路：接入仓库、离线建图、需求工单导入、图证据扩展、审阅任务生成。当前仓库完成建库后，工单导入和审阅任务区自动解锁。</p>
       </div>
       <el-space wrap>
         <el-button type="primary" @click="connectRepoDialogVisible = true"><el-icon><Link /></el-icon>接入代码仓库</el-button>
-        <el-button type="primary" plain :disabled="!currentRepoReady" @click="createDialogVisible = true"><el-icon><DocumentAdd /></el-icon>新建审阅任务</el-button>
+        <el-button type="primary" plain :disabled="!currentRepoReady" @click="openImportDialog"><el-icon><Download /></el-icon>导入需求工单</el-button>
+        <el-button type="primary" plain :disabled="!currentRepoReady" @click="openCreateDialog"><el-icon><DocumentAdd /></el-icon>新建审阅任务</el-button>
         <el-button :loading="loadingIndexing" @click="refreshCurrentRepo"><el-icon><RefreshRight /></el-icon>刷新</el-button>
       </el-space>
     </div>
@@ -539,6 +680,58 @@ onMounted(async () => {
       <template #footer><el-space><el-button @click="connectRepoDialogVisible = false">取消</el-button><el-button type="primary" :loading="creatingRepoJob" @click="handleCreateRepoJob">创建建库任务</el-button></el-space></template>
     </el-dialog>
 
+    <el-dialog v-model="importDialogVisible" title="导入需求工单" width="1120px">
+      <div class="dialog-grid">
+        <el-card class="panel-card">
+          <template #header>
+            <div class="head">
+              <span>工单来源</span>
+              <el-select v-model="selectedConnectorKey" style="width: 220px">
+                <el-option v-for="connector in workitemConnectors" :key="connector.connector_key" :label="connector.name" :value="connector.connector_key" />
+              </el-select>
+            </div>
+          </template>
+          <p v-if="selectedConnector" class="mini">{{ selectedConnector.description }}</p>
+          <div v-for="item in workitems" :key="item.item_id" class="list-card clickable" :class="{ active: item.item_id === selectedWorkItemId }" @click="selectWorkItem(item.item_id)">
+            <div class="head"><strong>{{ item.title }}</strong><el-tag size="small">{{ item.priority }}</el-tag></div>
+            <p class="mini">{{ item.requirement_id }} · {{ item.business_tag || '未分类' }}</p>
+            <p class="mini">{{ item.status }} · {{ formatTime(item.updated_at) }}</p>
+          </div>
+          <el-empty v-if="!loadingWorkitems && !workitems.length" description="当前接入器暂无工单" :image-size="56" />
+        </el-card>
+
+        <el-card class="panel-card">
+          <template #header><div class="head"><span>工单详情</span><el-tag v-if="workitemDetail">{{ workitemDetail.requirement_id }}</el-tag></div></template>
+          <el-skeleton v-if="loadingWorkitemDetail" :rows="8" animated />
+          <el-empty v-else-if="!workitemDetail" description="请选择一条工单" :image-size="56" />
+          <template v-else>
+            <p class="repo-title"><strong>{{ workitemDetail.title }}</strong></p>
+            <p class="mini">负责人 {{ workitemDetail.owner || '未指定' }} · 业务 {{ workitemDetail.business_tag || '未分类' }}</p>
+            <p class="mini">该导入器边界清晰，交付后企业方可只替换 connector 实现，不改审阅主链。</p>
+            <el-divider />
+            <p>{{ workitemDetail.requirement_text }}</p>
+            <ul class="mini-list">
+              <li v-for="item in workitemDetail.acceptance_criteria" :key="item">{{ item }}</li>
+            </ul>
+            <div class="seed-list">
+              <div v-for="seed in workitemDetail.candidate_seeds" :key="seed.seed_id" class="list-card">
+                <strong>{{ seed.filename }}</strong>
+                <p class="mini">{{ seed.recall_reason }}</p>
+                <pre class="code">{{ seed.code }}</pre>
+              </div>
+            </div>
+          </template>
+        </el-card>
+      </div>
+      <template #footer>
+        <el-space>
+          <el-button @click="importDialogVisible = false">取消</el-button>
+          <el-button plain :disabled="!workitemDetail" @click="applyWorkitemToTaskForm">带入手工编辑</el-button>
+          <el-button type="primary" :loading="importingWorkitem" :disabled="!workitemDetail || !currentRepoReady" @click="handleImportWorkitem">直接导入并创建任务</el-button>
+        </el-space>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="createDialogVisible" title="新建需求审阅任务" width="920px">
       <el-form label-position="top">
         <el-row :gutter="12"><el-col :span="12"><el-form-item label="需求编号"><el-input v-model="taskForm.requirementId" /></el-form-item></el-col><el-col :span="12"><el-form-item label="任务标题"><el-input v-model="taskForm.title" /></el-form-item></el-col></el-row>
@@ -567,6 +760,7 @@ onMounted(async () => {
 .list-card, .inner { margin-top: 12px; }
 .list-card { padding: 12px; border: 1px solid rgba(50, 91, 130, 0.12); border-radius: 12px; background: linear-gradient(180deg, #fff 0%, #fafcff 100%); }
 .list-card.active { border-color: rgba(50, 91, 130, 0.32); }
+.clickable { cursor: pointer; }
 .mini { margin: 6px 0 0; color: #6f7890; font-size: 12px; }
 .mini-list { margin: 8px 0 0; padding-left: 18px; color: #33445d; line-height: 1.7; }
 .repo-title { margin: 0; font-size: 20px; color: #21344d; }
@@ -579,6 +773,11 @@ onMounted(async () => {
 .log-line { color: #dbe7ff; font-size: 12px; line-height: 1.7; word-break: break-all; }
 .code { overflow: auto; margin: 8px 0 0; padding: 12px; border-radius: 12px; background: #1f2632; color: #edf2fd; font-size: 12px; white-space: pre-wrap; }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+.dialog-grid { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 16px; }
+.seed-list { max-height: 420px; overflow: auto; padding-right: 4px; }
 .mt { margin-top: 10px; }
-@media (max-width: 960px) { .hero { flex-direction: column; align-items: flex-start; } .grid, .stat-grid, .stat-grid.compact { grid-template-columns: 1fr; } }
+@media (max-width: 960px) { .hero { flex-direction: column; align-items: flex-start; } .grid, .stat-grid, .stat-grid.compact, .dialog-grid { grid-template-columns: 1fr; } }
 </style>
+
+
+

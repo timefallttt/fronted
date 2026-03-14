@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import SearchView from '@/pages/SearchView.vue'
 import ConsistencyView from '@/pages/ConsistencyView.vue'
 import { ref } from 'vue'
