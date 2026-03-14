@@ -23,6 +23,34 @@ export interface AnalyzeOptions {
   enable_tool_evidence: boolean
 }
 
+export interface GraphEvidenceStepInput {
+  node_id: string
+  node_type: string
+  name: string
+  path: string
+  relation_from_prev?: string | null
+}
+
+export interface GraphEvidencePathInput {
+  path_id: string
+  hop_count: number
+  nodes: GraphEvidenceStepInput[]
+}
+
+export interface GraphEvidenceSummaryInput {
+  matched_seed_count: number
+  expanded_node_count: number
+  expanded_edge_count: number
+  evidence_path_count: number
+}
+
+export interface GraphEvidenceBundle {
+  source: string
+  hints: string[]
+  paths: GraphEvidencePathInput[]
+  summary: GraphEvidenceSummaryInput
+}
+
 export interface RequirementSpec {
   intents: string[]
   constraints: string[]
@@ -121,6 +149,7 @@ export interface ReviewTaskDetail {
   owner: string
   notes: string
   candidate_snippets: CandidateSnippet[]
+  graph_evidence?: GraphEvidenceBundle | null
   report: ReviewReport | null
   feedback_entries: ReviewFeedback[]
 }
@@ -158,6 +187,7 @@ export interface ReviewTaskCreateRequest {
   owner: string
   notes: string
   candidate_snippets: CandidateSnippet[]
+  graph_evidence?: GraphEvidenceBundle | null
   options: AnalyzeOptions
 }
 
@@ -172,6 +202,7 @@ export interface ConsistencyAnalyzeRequest {
   requirement_text: string
   acceptance_criteria: string[]
   candidate_snippets: CandidateSnippet[]
+  graph_evidence?: GraphEvidenceBundle | null
   options: AnalyzeOptions
 }
 
@@ -206,4 +237,3 @@ export const submitReviewFeedback = (taskId: string, payload: ReviewFeedbackRequ
 export const analyzeConsistency = (payload: ConsistencyAnalyzeRequest) => {
   return axiosInstance.post<ReviewReport>('/consistency/analyze', payload).then((res) => res.data)
 }
-
