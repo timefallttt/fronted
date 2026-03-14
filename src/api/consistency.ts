@@ -28,6 +28,10 @@ export interface GraphEvidenceStepInput {
   node_type: string
   name: string
   path: string
+  start_line?: number | null
+  end_line?: number | null
+  signature: string
+  code_excerpt: string
   relation_from_prev?: string | null
 }
 
@@ -273,6 +277,10 @@ export const createReviewTask = (payload: ReviewTaskCreateRequest) => {
 
 export const analyzeReviewTask = (taskId: string) => {
   return axiosInstance.post<ReviewTaskDetail>(`/consistency/tasks/${taskId}/analyze`).then((res) => res.data)
+}
+
+export const deleteReviewTask = (taskId: string) => {
+  return axiosInstance.delete(`/consistency/tasks/${taskId}`).then((res) => res.data)
 }
 
 export const getReviewHistory = (taskId: string) => {

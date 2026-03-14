@@ -1,9 +1,10 @@
 ﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Download, Link, RefreshRight } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete, Download, Link, RefreshRight } from '@element-plus/icons-vue'
 import {
   analyzeReviewTask,
+  deleteReviewTask,
   getReviewDashboard,
   getReviewHistory,
   getReviewTask,
@@ -15,6 +16,7 @@ import {
 } from '@/api/consistency'
 import {
   createIndexJob,
+  deleteIndexJob,
   getIndexJob,
   listIndexJobs,
   runIndexJob,
@@ -54,6 +56,8 @@ const loadingWorkitemDetail = ref(false)
 const creatingRepoJob = ref(false)
 const importingWorkitem = ref(false)
 const runningRepoJobId = ref('')
+const deletingRepoJobId = ref('')
+const deletingTaskId = ref('')
 const submittingFeedback = ref(false)
 const connectRepoDialogVisible = ref(false)
 const importDialogVisible = ref(false)
@@ -311,6 +315,36 @@ const handleRunRepoJob = async (jobId: string) => {
   }
 }
 
+const handleDeleteRepoJob = async (jobId: string) => {
+  try {
+    await ElMessageBox.confirm('删除后将移除建库任务记录，并清理对应图工件。若该仓库没有被其他任务引用，本地克隆目录也会一并清理。', '删除建库任务', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消'
+    })
+  } catch {
+    return
+  }
+
+  deletingRepoJobId.value = jobId
+  try {
+    await deleteIndexJob(jobId)
+    if (currentRepoJob.value?.summary.job_id === jobId) {
+      currentRepoJob.value = null
+      activeTaskId.value = ''
+      taskDetail.value = null
+      historyRecords.value = []
+    }
+    await Promise.all([loadIndexingJobs(false), loadDashboard()])
+    ElMessage.success('建库任务已删除')
+  } catch (error) {
+    ElMessage.error('删除建库任务失败')
+    console.error(error)
+  } finally {
+    deletingRepoJobId.value = ''
+  }
+}
+
 const handleImportWorkitem = async () => {
   if (!currentRepoReady.value || !currentRepoJob.value || !workitemDetail.value || !selectedConnectorKey.value) {
     ElMessage.warning('请先选择当前仓库和待导入工单')
@@ -351,6 +385,35 @@ const handleAnalyzeTask = async () => {
     console.error(error)
   } finally {
     loadingTask.value = false
+  }
+}
+
+const handleDeleteReviewTask = async (taskId: string) => {
+  try {
+    await ElMessageBox.confirm('删除后将移除该审阅任务、报告、历史记录和人工复核记录。此操作不可恢复。', '删除审阅任务', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消'
+    })
+  } catch {
+    return
+  }
+
+  deletingTaskId.value = taskId
+  try {
+    await deleteReviewTask(taskId)
+    if (activeTaskId.value === taskId) {
+      activeTaskId.value = ''
+      taskDetail.value = null
+      historyRecords.value = []
+    }
+    await loadDashboard()
+    ElMessage.success('审阅任务已删除')
+  } catch (error) {
+    ElMessage.error('删除审阅任务失败')
+    console.error(error)
+  } finally {
+    deletingTaskId.value = ''
   }
 }
 
@@ -451,6 +514,7 @@ onMounted(async () => {
             <el-space wrap>
               <el-button size="small" @click="selectRepoJob(job.job_id)">查看</el-button>
               <el-button size="small" type="primary" plain :loading="runningRepoJobId === job.job_id" @click="handleRunRepoJob(job.job_id)">重新建库</el-button>
+              <el-button size="small" type="danger" plain :loading="deletingRepoJobId === job.job_id" @click="handleDeleteRepoJob(job.job_id)"><el-icon><Delete /></el-icon>删除</el-button>
             </el-space>
           </div>
         </el-card>
@@ -487,7 +551,10 @@ onMounted(async () => {
           <template #header>
             <div class="head">
               <span>{{ taskDetail?.task.title || '审阅详情' }}</span>
-              <el-button type="primary" plain :disabled="!activeTaskId || !currentRepoReady" :loading="loadingTask" @click="handleAnalyzeTask">重新生成报告</el-button>
+              <el-space wrap>
+                <el-button type="primary" plain :disabled="!activeTaskId || !currentRepoReady" :loading="loadingTask" @click="handleAnalyzeTask">重新生成报告</el-button>
+                <el-button type="danger" plain :disabled="!activeTaskId" :loading="deletingTaskId === activeTaskId" @click="activeTaskId && handleDeleteReviewTask(activeTaskId)"><el-icon><Delete /></el-icon>删除任务</el-button>
+              </el-space>
             </div>
           </template>
           <el-empty v-if="!taskDetail" description="请选择一个审阅任务" :image-size="64" />

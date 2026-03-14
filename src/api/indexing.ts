@@ -98,6 +98,9 @@ export interface GraphEvidencePathStep {
   node_type: GraphNodeType
   name: string
   path: string
+  start_line?: number | null
+  end_line?: number | null
+  signature: string
   relation_from_prev?: GraphEdgeType | null
 }
 
@@ -140,6 +143,10 @@ export const createIndexJob = (payload: RepositoryIndexRequest) => {
 
 export const runIndexJob = (jobId: string) => {
   return axiosInstance.post<IndexJobDetail>(`/indexing/jobs/${jobId}/run`).then((res) => res.data)
+}
+
+export const deleteIndexJob = (jobId: string) => {
+  return axiosInstance.delete(`/indexing/jobs/${jobId}`).then((res) => res.data)
 }
 
 export const queryIndexEvidence = (jobId: string, payload: GraphEvidenceQueryRequest) => {
