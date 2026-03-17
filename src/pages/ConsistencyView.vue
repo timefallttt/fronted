@@ -619,6 +619,11 @@ onMounted(async () => {
                 <strong>LLM 请求预览</strong>
                 <p class="mini">{{ taskDetail.report.llm_request_preview.model_name }} · {{ taskDetail.report.llm_request_preview.mode }}</p>
                 <p>{{ taskDetail.report.llm_request_preview.summary }}</p>
+                <p class="mini">System Message</p>
+                <pre class="code">{{ taskDetail.report.llm_request_preview.system_message }}</pre>
+                <p class="mini">User Message</p>
+                <pre class="code">{{ taskDetail.report.llm_request_preview.user_message }}</pre>
+                <p class="mini">调试载荷</p>
                 <pre class="code">{{ JSON.stringify(taskDetail.report.llm_request_preview.request_body, null, 2) }}</pre>
               </div>
               <div v-if="taskDetail.report.llm_result" class="llm-review-box">

@@ -145,6 +145,8 @@ export interface LlmRequestPreview {
   provider: string
   model_name: string
   summary: string
+  system_message: string
+  user_message: string
   request_body: Record<string, unknown>
 }
 
