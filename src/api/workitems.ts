@@ -2,7 +2,7 @@
 import type { ReviewTaskDetail } from './consistency'
 
 export type WorkItemPriority = 'high' | 'medium' | 'low'
-export type ConnectorMode = 'demo' | 'custom'
+export type ConnectorMode = 'custom'
 export type DiffChangeType = 'added' | 'modified' | 'deleted' | 'renamed'
 
 export interface WorkItemConnectorSummary {
@@ -108,3 +108,4 @@ export const getWorkItemDetail = (connectorKey: string, itemId: string) => {
 export const importWorkItem = (payload: WorkItemImportRequest) => {
   return axiosInstance.post<ReviewTaskDetail>('/workitems/import', payload).then((res) => res.data)
 }
+

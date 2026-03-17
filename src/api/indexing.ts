@@ -1,7 +1,7 @@
-import axiosInstance from './axiosInstance'
+﻿import axiosInstance from './axiosInstance'
 
 export type IndexJobStatus = 'queued' | 'running' | 'completed' | 'completed_with_warnings' | 'failed'
-export type ParserMode = 'arkanalyzer' | 'placeholder'
+export type ParserMode = 'arkanalyzer'
 export type GraphStoreStatus = 'loaded' | 'pending_setup' | 'failed' | 'not_attempted'
 export type GraphQuerySource = 'neo4j' | 'artifact'
 export type GraphNodeType = 'Repository' | 'File' | 'Class' | 'Function'
@@ -152,3 +152,4 @@ export const deleteIndexJob = (jobId: string) => {
 export const queryIndexEvidence = (jobId: string, payload: GraphEvidenceQueryRequest) => {
   return axiosInstance.post<GraphEvidenceQueryResponse>(`/indexing/jobs/${jobId}/evidence`, payload).then((res) => res.data)
 }
+

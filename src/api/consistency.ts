@@ -1,10 +1,11 @@
 import axiosInstance from './axiosInstance'
 
-export type JudgementStatus = 'satisfied' | 'partially_satisfied' | 'not_satisfied'
+export type JudgementStatus = 'satisfied' | 'partially_satisfied' | 'not_satisfied' | 'error'
 export type TaskStatus = 'draft' | 'ready' | 'completed' | 'needs_review'
 export type FeedbackDecision = 'agree' | 'question' | 'misjudged'
 export type Priority = 'high' | 'medium' | 'low'
 export type NodeType = 'requirement' | 'file' | 'class' | 'function' | 'constraint' | 'ui' | 'service'
+export type LlmReviewVerdict = 'satisfied' | 'partially_satisfied' | 'not_satisfied' | 'error'
 
 export interface CandidateSnippet {
   snippet_id: string
@@ -130,20 +131,11 @@ export interface LlmEvidencePath {
   nodes: LlmEvidenceGraphNode[]
 }
 
-export interface LlmEvidenceRequirementItem {
-  item: string
-  status_hint: JudgementStatus
-  snippet_ids: string[]
-  path_ids: string[]
-  negative_signals: string[]
-}
-
 export interface LlmEvidencePack {
   requirement_text: string
   acceptance_criteria: string[]
   snippets: LlmEvidenceSnippet[]
   graph_paths: LlmEvidencePath[]
-  requirement_items: LlmEvidenceRequirementItem[]
   structural_gaps: string[]
   tool_findings: ToolFinding[]
 }
@@ -154,6 +146,28 @@ export interface LlmRequestPreview {
   model_name: string
   summary: string
   request_body: Record<string, unknown>
+}
+
+export interface LlmItemAssessment {
+  item: string
+  verdict: LlmReviewVerdict
+  reasoning: string
+  supporting_snippet_ids: string[]
+  supporting_path_ids: string[]
+  manual_review_needed: boolean
+}
+
+export interface LlmReviewResult {
+  status: 'success' | 'error'
+  provider: string
+  model_name: string
+  summary: string
+  overall_verdict: LlmReviewVerdict
+  manual_review_needed: boolean
+  item_assessments: LlmItemAssessment[]
+  response_text: string
+  response_body: Record<string, unknown>
+  error_message: string
 }
 
 export interface ReviewReport {
@@ -169,6 +183,7 @@ export interface ReviewReport {
   review_focuses: string[]
   evidence_pack?: LlmEvidencePack | null
   llm_request_preview?: LlmRequestPreview | null
+  llm_result?: LlmReviewResult | null
   summary: string
 }
 
@@ -260,6 +275,13 @@ export interface ReviewFeedbackRequest {
   reviewer: string
 }
 
+export interface LlmReviewExecuteRequest {
+  provider: string
+  api_url: string
+  api_key: string
+  model_name: string
+}
+
 export interface ConsistencyAnalyzeRequest {
   requirement_text: string
   acceptance_criteria: string[]
@@ -286,6 +308,10 @@ export const createReviewTask = (payload: ReviewTaskCreateRequest) => {
 
 export const analyzeReviewTask = (taskId: string) => {
   return axiosInstance.post<ReviewTaskDetail>(`/consistency/tasks/${taskId}/analyze`).then((res) => res.data)
+}
+
+export const executeLlmReview = (taskId: string, payload: LlmReviewExecuteRequest) => {
+  return axiosInstance.post<ReviewTaskDetail>(`/consistency/tasks/${taskId}/llm-review`, payload).then((res) => res.data)
 }
 
 export const deleteReviewTask = (taskId: string) => {

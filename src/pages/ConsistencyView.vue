@@ -5,6 +5,7 @@ import { Delete, Download, Link, RefreshRight } from '@element-plus/icons-vue'
 import {
   analyzeReviewTask,
   deleteReviewTask,
+  executeLlmReview,
   getReviewDashboard,
   getReviewHistory,
   getReviewTask,
@@ -59,6 +60,7 @@ const runningRepoJobId = ref('')
 const deletingRepoJobId = ref('')
 const deletingTaskId = ref('')
 const submittingFeedback = ref(false)
+const runningLlmReview = ref(false)
 const connectRepoDialogVisible = ref(false)
 const importDialogVisible = ref(false)
 
@@ -74,7 +76,8 @@ const reviewStatusMeta: Record<string, string> = {
   draft: '草稿',
   satisfied: '满足',
   partially_satisfied: '部分满足',
-  not_satisfied: '不满足'
+  not_satisfied: '不满足',
+  error: '错误'
 }
 const indexStatusMeta: Record<IndexJobStatus, string> = {
   queued: '排队中',
@@ -84,8 +87,7 @@ const indexStatusMeta: Record<IndexJobStatus, string> = {
   failed: '建库失败'
 }
 const parserModeMeta: Record<ParserMode, string> = {
-  arkanalyzer: 'ArkAnalyzer',
-  placeholder: '占位解析'
+  arkanalyzer: 'ArkAnalyzer'
 }
 const graphStoreMeta: Record<GraphStoreStatus, string> = {
   loaded: '已写入 Neo4j',
@@ -388,6 +390,27 @@ const handleAnalyzeTask = async () => {
   }
 }
 
+const handleExecuteLlmReview = async () => {
+  if (!activeTaskId.value || !currentRepoReady.value) return
+  runningLlmReview.value = true
+  try {
+    taskDetail.value = await executeLlmReview(activeTaskId.value, {
+      provider: '',
+      api_url: '',
+      api_key: '',
+      model_name: ''
+    })
+    historyRecords.value = (await getReviewHistory(activeTaskId.value)).records
+    await loadDashboard()
+    ElMessage.success('已执行 LLM 审阅请求')
+  } catch (error) {
+    ElMessage.error('执行 LLM 审阅失败')
+    console.error(error)
+  } finally {
+    runningLlmReview.value = false
+  }
+}
+
 const handleDeleteReviewTask = async (taskId: string) => {
   try {
     await ElMessageBox.confirm('删除后将移除该审阅任务、报告、历史记录和人工复核记录。此操作不可恢复。', '删除审阅任务', {
@@ -553,6 +576,7 @@ onMounted(async () => {
               <span>{{ taskDetail?.task.title || '审阅详情' }}</span>
               <el-space wrap>
                 <el-button type="primary" plain :disabled="!activeTaskId || !currentRepoReady" :loading="loadingTask" @click="handleAnalyzeTask">重新生成报告</el-button>
+                <el-button type="primary" :disabled="!activeTaskId || !currentRepoReady || !taskDetail?.report?.llm_request_preview" :loading="runningLlmReview" @click="handleExecuteLlmReview">执行 LLM 审阅</el-button>
                 <el-button type="danger" plain :disabled="!activeTaskId" :loading="deletingTaskId === activeTaskId" @click="activeTaskId && handleDeleteReviewTask(activeTaskId)"><el-icon><Delete /></el-icon>删除任务</el-button>
               </el-space>
             </div>
@@ -589,13 +613,20 @@ onMounted(async () => {
                 <span>证据包</span>
                 <span>片段 {{ taskDetail.report.evidence_pack.snippets.length }}</span>
                 <span>图路径 {{ taskDetail.report.evidence_pack.graph_paths.length }}</span>
-                <span>要点映射 {{ taskDetail.report.evidence_pack.requirement_items.length }}</span>
+                <span>验收项 {{ taskDetail.report.evidence_pack.acceptance_criteria.length }}</span>
               </div>
               <div v-if="taskDetail.report.llm_request_preview" class="llm-review-box">
                 <strong>LLM 请求预览</strong>
                 <p class="mini">{{ taskDetail.report.llm_request_preview.model_name }} · {{ taskDetail.report.llm_request_preview.mode }}</p>
                 <p>{{ taskDetail.report.llm_request_preview.summary }}</p>
                 <pre class="code">{{ JSON.stringify(taskDetail.report.llm_request_preview.request_body, null, 2) }}</pre>
+              </div>
+              <div v-if="taskDetail.report.llm_result" class="llm-review-box">
+                <strong>LLM 审阅结果</strong>
+                <p class="mini">{{ taskDetail.report.llm_result.provider }} · {{ taskDetail.report.llm_result.model_name }} · {{ taskDetail.report.llm_result.status }}</p>
+                <p>{{ taskDetail.report.llm_result.summary }}</p>
+                <p v-if="taskDetail.report.llm_result.error_message" class="mini">{{ taskDetail.report.llm_result.error_message }}</p>
+                <pre v-if="taskDetail.report.llm_result.response_text" class="code">{{ taskDetail.report.llm_result.response_text }}</pre>
               </div>
               <div class="grid">
                 <div>
