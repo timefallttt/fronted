@@ -167,6 +167,10 @@ export interface LlmReviewResult {
   overall_verdict: LlmReviewVerdict
   manual_review_needed: boolean
   item_assessments: LlmItemAssessment[]
+  missing_items: string[]
+  conflicts: string[]
+  overall_score_raw?: number | null
+  confidence?: number | null
   response_text: string
   response_body: Record<string, unknown>
   error_message: string
@@ -179,6 +183,7 @@ export interface ReviewReport {
   requirement_spec: RequirementSpec
   judgements: ItemJudgement[]
   missing_items: string[]
+  conflicts: string[]
   tool_findings: ToolFinding[]
   evidence_paths: EvidencePath[]
   structural_gaps: string[]
@@ -277,12 +282,7 @@ export interface ReviewFeedbackRequest {
   reviewer: string
 }
 
-export interface LlmReviewExecuteRequest {
-  provider: string
-  api_url: string
-  api_key: string
-  model_name: string
-}
+export interface LlmReviewExecuteRequest {}
 
 export interface ConsistencyAnalyzeRequest {
   requirement_text: string
@@ -312,8 +312,10 @@ export const analyzeReviewTask = (taskId: string) => {
   return axiosInstance.post<ReviewTaskDetail>(`/consistency/tasks/${taskId}/analyze`).then((res) => res.data)
 }
 
-export const executeLlmReview = (taskId: string, payload: LlmReviewExecuteRequest) => {
-  return axiosInstance.post<ReviewTaskDetail>(`/consistency/tasks/${taskId}/llm-review`, payload).then((res) => res.data)
+export const executeLlmReview = (taskId: string, payload: LlmReviewExecuteRequest = {}) => {
+  return axiosInstance.post<ReviewTaskDetail>(`/consistency/tasks/${taskId}/llm-review`, payload, {
+    timeout: 180000
+  }).then((res) => res.data)
 }
 
 export const deleteReviewTask = (taskId: string) => {

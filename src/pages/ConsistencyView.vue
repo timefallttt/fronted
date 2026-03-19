@@ -65,11 +65,13 @@ const connectRepoDialogVisible = ref(false)
 const importDialogVisible = ref(false)
 
 let pollingTimer: number | null = null
+let llmPollingTimer: number | null = null
 
 const repoForm = reactive({ repoUrl: '', branch: 'main', repoName: '' })
 const feedbackForm = reactive({ judgementItem: '', decision: 'agree' as FeedbackDecision, comment: '', reviewer: '' })
 
 const reviewStatusMeta: Record<string, string> = {
+  reviewing: '审阅中',
   completed: '已完成',
   needs_review: '需复核',
   ready: '就绪',
@@ -106,6 +108,7 @@ const currentRepoReady = computed(() => Boolean(currentRepoJob.value) && ['compl
 const currentRepoBusy = computed(() => Boolean(currentRepoJob.value) && ['queued', 'running'].includes(currentRepoJob.value.summary.status))
 const repoTasks = computed(() => (dashboard.value?.tasks ?? []).filter((task) => task.repo_name === currentRepoName.value))
 const feedbackItems = computed(() => taskDetail.value?.report?.judgements.map((item) => item.item) ?? [])
+const currentTaskReviewing = computed(() => taskDetail.value?.report?.status === 'reviewing')
 const graphStats = computed(() => currentRepoJob.value?.graph_stats ?? {
   file_count: 0,
   class_count: 0,
@@ -129,6 +132,13 @@ const stopPolling = () => {
   }
 }
 
+const stopLlmReviewPolling = () => {
+  if (llmPollingTimer !== null) {
+    window.clearInterval(llmPollingTimer)
+    llmPollingTimer = null
+  }
+}
+
 const startPolling = () => {
   stopPolling()
   pollingTimer = window.setInterval(async () => {
@@ -144,12 +154,20 @@ watch(currentRepoBusy, (busy) => {
   else stopPolling()
 })
 
+watch(currentTaskReviewing, (reviewing) => {
+  if (reviewing) startLlmReviewPolling()
+  else stopLlmReviewPolling()
+})
+
 watch(selectedConnectorKey, async (connectorKey) => {
   if (!connectorKey) return
   await loadWorkitems(connectorKey, false)
 })
 
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => {
+  stopPolling()
+  stopLlmReviewPolling()
+})
 
 const formatScore = (value?: number) => Number(value ?? 0).toFixed(3)
 const formatTime = (value?: string) => value?.replace('T', ' ') ?? '-'
@@ -317,6 +335,32 @@ const handleRunRepoJob = async (jobId: string) => {
   }
 }
 
+const startLlmReviewPolling = () => {
+  if (!activeTaskId.value) return
+  stopLlmReviewPolling()
+  llmPollingTimer = window.setInterval(async () => {
+    if (!activeTaskId.value) {
+      stopLlmReviewPolling()
+      return
+    }
+    try {
+      const [detail, history] = await Promise.all([getReviewTask(activeTaskId.value), getReviewHistory(activeTaskId.value)])
+      taskDetail.value = detail
+      historyRecords.value = history.records
+      if (detail.report?.status !== 'reviewing') {
+        stopLlmReviewPolling()
+        await loadDashboard()
+        if (detail.report?.llm_result?.status === 'success') ElMessage.success('LLM 审阅已完成')
+        else ElMessage.error('LLM 审阅失败')
+      }
+    } catch (error) {
+      stopLlmReviewPolling()
+      ElMessage.error('轮询 LLM 审阅结果失败')
+      console.error(error)
+    }
+  }, 5000)
+}
+
 const handleDeleteRepoJob = async (jobId: string) => {
   try {
     await ElMessageBox.confirm('删除后将移除建库任务记录，并清理对应图工件。若该仓库没有被其他任务引用，本地克隆目录也会一并清理。', '删除建库任务', {
@@ -391,18 +435,18 @@ const handleAnalyzeTask = async () => {
 }
 
 const handleExecuteLlmReview = async () => {
-  if (!activeTaskId.value || !currentRepoReady.value) return
+  if (!activeTaskId.value || !currentRepoReady.value || currentTaskReviewing.value) return
   runningLlmReview.value = true
   try {
-    taskDetail.value = await executeLlmReview(activeTaskId.value, {
-      provider: '',
-      api_url: '',
-      api_key: '',
-      model_name: ''
-    })
+    taskDetail.value = await executeLlmReview(activeTaskId.value)
     historyRecords.value = (await getReviewHistory(activeTaskId.value)).records
     await loadDashboard()
-    ElMessage.success('已执行 LLM 审阅请求')
+    if (taskDetail.value?.report?.status === 'reviewing') {
+      startLlmReviewPolling()
+      ElMessage.success('已发起 LLM 审阅，系统正在后台处理')
+    } else {
+      ElMessage.success('已执行 LLM 审阅请求')
+    }
   } catch (error) {
     ElMessage.error('执行 LLM 审阅失败')
     console.error(error)
@@ -576,7 +620,7 @@ onMounted(async () => {
               <span>{{ taskDetail?.task.title || '审阅详情' }}</span>
               <el-space wrap>
                 <el-button type="primary" plain :disabled="!activeTaskId || !currentRepoReady" :loading="loadingTask" @click="handleAnalyzeTask">重新生成报告</el-button>
-                <el-button type="primary" :disabled="!activeTaskId || !currentRepoReady || !taskDetail?.report?.llm_request_preview" :loading="runningLlmReview" @click="handleExecuteLlmReview">执行 LLM 审阅</el-button>
+                <el-button type="primary" :disabled="!activeTaskId || !currentRepoReady || !taskDetail?.report?.llm_request_preview || currentTaskReviewing" :loading="runningLlmReview" @click="handleExecuteLlmReview">{{ currentTaskReviewing ? 'LLM 审阅中' : '执行 LLM 审阅' }}</el-button>
                 <el-button type="danger" plain :disabled="!activeTaskId" :loading="deletingTaskId === activeTaskId" @click="activeTaskId && handleDeleteReviewTask(activeTaskId)"><el-icon><Delete /></el-icon>删除任务</el-button>
               </el-space>
             </div>
@@ -617,21 +661,20 @@ onMounted(async () => {
               </div>
               <div v-if="taskDetail.report.llm_request_preview" class="llm-review-box">
                 <strong>LLM 请求预览</strong>
-                <p class="mini">{{ taskDetail.report.llm_request_preview.model_name }} · {{ taskDetail.report.llm_request_preview.mode }}</p>
-                <p>{{ taskDetail.report.llm_request_preview.summary }}</p>
+                <p class="mini">{{ taskDetail.report.llm_request_preview.mode }}</p>
+                <p v-if="!taskDetail.report.llm_result && taskDetail.report.status !== 'reviewing'">{{ taskDetail.report.llm_request_preview.summary }}</p>
+                <p v-else-if="taskDetail.report.status === 'reviewing'">本次审阅请求已提交到后端，正在等待模型返回结果。</p>
+                <p v-else>本次审阅使用的请求正文如下。</p>
                 <p class="mini">System Message</p>
                 <pre class="code">{{ taskDetail.report.llm_request_preview.system_message }}</pre>
                 <p class="mini">User Message</p>
                 <pre class="code">{{ taskDetail.report.llm_request_preview.user_message }}</pre>
-                <p class="mini">调试载荷</p>
-                <pre class="code">{{ JSON.stringify(taskDetail.report.llm_request_preview.request_body, null, 2) }}</pre>
               </div>
               <div v-if="taskDetail.report.llm_result" class="llm-review-box">
                 <strong>LLM 审阅结果</strong>
-                <p class="mini">{{ taskDetail.report.llm_result.provider }} · {{ taskDetail.report.llm_result.model_name }} · {{ taskDetail.report.llm_result.status }}</p>
+                <p class="mini">{{ taskDetail.report.llm_result.status }}</p>
                 <p>{{ taskDetail.report.llm_result.summary }}</p>
                 <p v-if="taskDetail.report.llm_result.error_message" class="mini">{{ taskDetail.report.llm_result.error_message }}</p>
-                <pre v-if="taskDetail.report.llm_result.response_text" class="code">{{ taskDetail.report.llm_result.response_text }}</pre>
               </div>
               <div class="grid">
                 <div>
@@ -647,13 +690,7 @@ onMounted(async () => {
                   </ul>
                 </div>
                 <div>
-                  <strong>结构性缺口</strong>
-                  <ul class="mini-list">
-                    <li v-for="gap in taskDetail.report.structural_gaps" :key="gap">{{ gap }}</li>
-                  </ul>
-                </div>
-                <div>
-                  <strong>建议复核点</strong>
+                  <strong>人工复核要点</strong>
                   <ul class="mini-list">
                     <li v-for="focus in taskDetail.report.review_focuses" :key="focus">{{ focus }}</li>
                   </ul>
