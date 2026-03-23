@@ -124,6 +124,7 @@ const repoTaskStats = computed(() => {
   }
 })
 const selectedConnector = computed(() => workitemConnectors.value.find((item) => item.connector_key === selectedConnectorKey.value) ?? null)
+const canDeleteRepoJob = (job: IndexJobSummary) => !['queued', 'running'].includes(job.status)
 
 const stopPolling = () => {
   if (pollingTimer !== null) {
@@ -362,8 +363,13 @@ const startLlmReviewPolling = () => {
 }
 
 const handleDeleteRepoJob = async (jobId: string) => {
+  const job = indexingJobs.value.find((entry) => entry.job_id === jobId)
+  if (job && !canDeleteRepoJob(job)) {
+    ElMessage.warning('排队中或运行中的建库任务不能删除')
+    return
+  }
   try {
-    await ElMessageBox.confirm('删除后将移除建库任务记录，并清理对应图工件。若该仓库没有被其他任务引用，本地克隆目录也会一并清理。', '删除建库任务', {
+    await ElMessageBox.confirm('删除后将移除该建库任务的记录、图工件、本地仓库副本以及对应图库快照；系统不会影响其他建库任务仍在使用的数据。排队中或运行中的任务不能删除。', '删除建库任务', {
       type: 'warning',
       confirmButtonText: '删除',
       cancelButtonText: '取消'
@@ -581,7 +587,7 @@ onMounted(async () => {
             <el-space wrap>
               <el-button size="small" @click="selectRepoJob(job.job_id)">查看</el-button>
               <el-button size="small" type="primary" plain :loading="runningRepoJobId === job.job_id" @click="handleRunRepoJob(job.job_id)">重新建库</el-button>
-              <el-button size="small" type="danger" plain :loading="deletingRepoJobId === job.job_id" @click="handleDeleteRepoJob(job.job_id)"><el-icon><Delete /></el-icon>删除</el-button>
+              <el-button size="small" type="danger" plain :disabled="!canDeleteRepoJob(job)" :loading="deletingRepoJobId === job.job_id" @click="handleDeleteRepoJob(job.job_id)"><el-icon><Delete /></el-icon>删除</el-button>
             </el-space>
           </div>
         </el-card>
