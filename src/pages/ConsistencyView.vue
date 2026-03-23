@@ -369,7 +369,7 @@ const handleDeleteRepoJob = async (jobId: string) => {
     return
   }
   try {
-    await ElMessageBox.confirm('删除后将移除该建库任务的记录、图工件、本地仓库副本以及对应图库快照；系统不会影响其他建库任务仍在使用的数据。排队中或运行中的任务不能删除。', '删除建库任务', {
+    await ElMessageBox.confirm('删除后将移除该建库任务的记录、图工件、本地仓库副本、对应图库快照，以及同一仓库快照下关联的审阅任务历史；系统不会影响其他建库任务仍在使用的数据。排队中或运行中的任务不能删除。', '删除建库任务', {
       type: 'warning',
       confirmButtonText: '删除',
       cancelButtonText: '取消'
